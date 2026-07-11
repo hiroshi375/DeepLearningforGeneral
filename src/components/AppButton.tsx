@@ -10,6 +10,7 @@ type Props = {
     children: ReactNode;
     onPress: (event: GestureResponderEvent) => void;
     mode?: "contained" | "outlined";
+    variant?: "default" | "admin";
     disabled?: boolean;
 };
 
@@ -17,6 +18,7 @@ export default function AppButton({
     children,
     onPress,
     mode = "contained",
+    variant = "default",
     disabled = false,
 }: Props) {
     return (
@@ -25,7 +27,11 @@ export default function AppButton({
             onPress={onPress}
             style={({ pressed }) => [
                 styles.button,
+                variant === "admin" && styles.adminButton,
                 mode === "outlined" && styles.outlined,
+                variant === "admin" &&
+                    mode === "outlined" &&
+                    styles.adminOutlined,
                 disabled && styles.disabled,
                 pressed && !disabled && styles.pressed,
             ]}
@@ -34,6 +40,9 @@ export default function AppButton({
                 style={[
                     styles.text,
                     mode === "outlined" && styles.outlinedText,
+                    variant === "admin" &&
+                        mode === "outlined" &&
+                        styles.adminOutlinedText,
                     disabled && styles.disabledText,
                 ]}
             >
@@ -74,5 +83,16 @@ const styles = StyleSheet.create({
     pressed: {
         opacity: 0.75,
         transform: [{ translateY: 1 }],
+    },
+    adminButton: {
+        backgroundColor: "#1f3a5f",
+        borderColor: "#1f3a5f",
+    },
+    adminOutlined: {
+        backgroundColor: "#ffffff",
+        borderColor: "#1f3a5f",
+    },
+    adminOutlinedText: {
+        color: "#1f3a5f",
     },
 });

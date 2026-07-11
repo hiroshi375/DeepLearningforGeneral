@@ -20,7 +20,7 @@ const schema = a.schema({
         })
         .authorization((allow) => [
             allow.authenticated().to(["read"]),
-            allow.owner(),
+            allow.groups(["Admins"]),
         ]),
 
     Question: a
@@ -36,7 +36,7 @@ const schema = a.schema({
         })
         .authorization((allow) => [
             allow.authenticated().to(["read"]),
-            allow.owner(),
+            allow.groups(["Admins"]),
         ]),
 
     Choice: a
@@ -48,7 +48,7 @@ const schema = a.schema({
         })
         .authorization((allow) => [
             allow.authenticated().to(["read"]),
-            allow.owner(),
+            allow.groups(["Admins"]),
         ]),
 
     QuestionSolution: a
@@ -59,7 +59,7 @@ const schema = a.schema({
         })
         .authorization((allow) => [
             allow.authenticated().to(["read"]),
-            allow.owner(),
+            allow.groups(["Admins"]),
         ]),
 
     QuizSession: a
