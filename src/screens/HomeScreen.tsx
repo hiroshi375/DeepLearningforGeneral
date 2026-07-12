@@ -1,15 +1,31 @@
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import AppButton from "../components/AppButton";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { signOut } from "aws-amplify/auth";
+import { fetchUserAttributes, getCurrentUser } from "aws-amplify/auth";
+import { client } from "../lib/client";
+import { getUrl } from "aws-amplify/storage";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Home">;
+type UserProfileItem = {
+    id: string;
+    userId?: string | null;
+    email?: string | null;
+    displayName?: string | null;
+    imageIconPath?: string | null;
+    role?: string | null;
+};
 
 export default function HomeScreen({ navigation }: Props) {
     const { isAdmin, checkingAdmin } = useIsAdmin();
+    const [loginUserName, setLoginUserName] = useState("ユーザー");
+    const [loginUserIconUrl, setLoginUserIconUrl] = useState<string | null>(
+        null,
+    );
 
     const handleSignOut = () => {
         Alert.alert("サインアウト", "サインアウトしますか？", [
@@ -32,15 +48,94 @@ export default function HomeScreen({ navigation }: Props) {
         ]);
     };
 
+    const loadLoginUser = useCallback(async () => {
+        try {
+            const currentUser = await getCurrentUser();
+            const attributes = await fetchUserAttributes();
+
+            const profileResult = await client.models.UserProfile.list({
+                filter: {
+                    userId: {
+                        eq: currentUser.userId,
+                    },
+                },
+            });
+
+            const profile = profileResult.data?.[0] as
+                UserProfileItem | undefined;
+
+            const displayName =
+                profile?.displayName?.trim() ||
+                attributes.name?.trim() ||
+                attributes.preferred_username?.trim() ||
+                attributes.email?.trim() ||
+                currentUser.signInDetails?.loginId ||
+                "ユーザー";
+
+            setLoginUserName(displayName);
+
+            if (profile?.imageIconPath) {
+                const urlResult = await getUrl({
+                    path: profile.imageIconPath,
+                });
+                setLoginUserIconUrl(urlResult.url.toString());
+            } else {
+                setLoginUserIconUrl(null);
+            }
+        } catch (error) {
+            console.error("Load login user error:", error);
+            setLoginUserName("ユーザー");
+            setLoginUserIconUrl(null);
+        }
+    }, []);
+
+    useEffect(() => {
+        const unsubscribe = navigation.addListener("focus", () => {
+            void loadLoginUser();
+        });
+
+        return unsubscribe;
+    }, [navigation, loadLoginUser]);
+
+    useEffect(() => {
+        const unsubscribe = navigation.addListener("focus", () => {
+            void loadLoginUser();
+        });
+
+        return unsubscribe;
+    }, [navigation, loadLoginUser]);
+
     return (
         <ScrollView contentContainerStyle={styles.container}>
-            <Text style={styles.title}>DeepLearning for General</Text>
-            <Text style={styles.subtitle}>G検定問題集アプリ</Text>
+            <View style={styles.headerArea}>
+                <Image
+                    source={require("../../assets/g-exam-icon.png")}
+                    style={styles.appIcon}
+                    resizeMode="contain"
+                />
+                <Text style={styles.appTitle}>G検定 問題集アプリ</Text>
+
+                <View style={styles.loginUserRow}>
+                    {loginUserIconUrl ? (
+                        <Image
+                            source={{ uri: loginUserIconUrl }}
+                            style={styles.loginUserIcon}
+                        />
+                    ) : (
+                        <View style={styles.loginUserIconPlaceholder}>
+                            <Text style={styles.loginUserIconPlaceholderText}>
+                                {loginUserName.slice(0, 1)}
+                            </Text>
+                        </View>
+                    )}
+
+                    <Text style={styles.loginUserName}>{loginUserName}</Text>
+                </View>
+            </View>
 
             <View style={styles.card}>
-                <Text style={styles.cardTitle}>学習を開始</Text>
                 <Text style={styles.cardText}>
-                    模擬試験・章別問題から選んで、G検定対策を進めます。
+                    模擬試験・章別問題から選んでG検定対策を進めます。
                 </Text>
 
                 <AppButton onPress={() => navigation.navigate("ExamList")}>
@@ -135,5 +230,62 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 22,
         color: "#4b5563",
+    },
+    headerArea: {
+        alignItems: "center",
+        marginBottom: 24,
+    },
+
+    appIcon: {
+        width: 120,
+        height: 120,
+        marginBottom: 12,
+    },
+
+    appTitle: {
+        fontSize: 26,
+        lineHeight: 34,
+        fontWeight: "700",
+        color: "#2f3349",
+        textAlign: "center",
+        marginBottom: 18,
+    },
+
+    loginUserRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        marginTop: 4,
+        marginBottom: 8,
+    },
+
+    loginUserIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#eef2f7",
+    },
+
+    loginUserIconPlaceholder: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#dbeafe",
+    },
+
+    loginUserIconPlaceholderText: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#2563eb",
+    },
+
+    loginUserName: {
+        fontSize: 17,
+        lineHeight: 24,
+        fontWeight: "700",
+        color: "#2f3349",
     },
 });

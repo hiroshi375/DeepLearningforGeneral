@@ -90,6 +90,18 @@ const schema = a.schema({
             explanationShown: a.boolean(),
         })
         .authorization((allow) => [allow.owner()]),
+
+    UserProfile: a
+        .model({
+            userId: a.string().required(),
+            email: a.email(),
+            displayName: a.string().required(),
+            imageIconPath: a.string(),
+            role: a.string(),
+            createdAt: a.datetime(),
+            updatedAt: a.datetime(),
+        })
+        .authorization((allow) => [allow.authenticated()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;

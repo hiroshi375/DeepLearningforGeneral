@@ -48,6 +48,12 @@ type ExamItem = {
 
 type ChoiceFeedbackType = "correct" | "incorrect" | "normal";
 
+type QuestionUiState = {
+    selectedChoiceIds: string[];
+    answered: boolean;
+    isCorrect: boolean | null;
+};
+
 const APP_FONT_FAMILY = Platform.select({
     ios: "Hiragino Sans",
     android: "sans-serif",
@@ -65,6 +71,9 @@ export default function QuizScreen({ route, navigation }: Props) {
     const [selectedChoiceIds, setSelectedChoiceIds] = useState<string[]>([]);
     const [answered, setAnswered] = useState(false);
     const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+    const [questionUiStates, setQuestionUiStates] = useState<
+        Record<string, QuestionUiState>
+    >({});
     const [correctCount, setCorrectCount] = useState(0);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [exam, setExam] = useState<ExamItem | null>(null);
@@ -96,6 +105,27 @@ export default function QuizScreen({ route, navigation }: Props) {
     const correctChoiceIds = useMemo(() => {
         return currentSolution?.correctChoiceIds ?? [];
     }, [currentSolution]);
+
+    const requiredSelectionCount = useMemo(() => {
+        if (!currentQuestion) {
+            return 1;
+        }
+
+        const questionType = currentQuestion.questionType ?? "SINGLE";
+
+        if (questionType === "SINGLE") {
+            return 1;
+        }
+
+        return Math.max(
+            1,
+            currentQuestion.selectionMax ??
+                (correctChoiceIds.length > 0 ? correctChoiceIds.length : 1),
+        );
+    }, [currentQuestion, correctChoiceIds]);
+
+    const hasRequiredSelection =
+        selectedChoiceIds.length === requiredSelectionCount;
 
     const getChoiceFeedbackType = useCallback(
         (choiceId: string): ChoiceFeedbackType => {
@@ -221,6 +251,21 @@ export default function QuizScreen({ route, navigation }: Props) {
         void loadQuiz();
     }, [loadQuiz]);
 
+    const saveCurrentQuestionState = useCallback(() => {
+        if (!currentQuestion) {
+            return;
+        }
+
+        setQuestionUiStates((prev) => ({
+            ...prev,
+            [currentQuestion.id]: {
+                selectedChoiceIds,
+                answered,
+                isCorrect,
+            },
+        }));
+    }, [currentQuestion, selectedChoiceIds, answered, isCorrect]);
+
     const toggleChoice = (choiceId: string) => {
         if (answered || !currentQuestion) {
             return;
@@ -248,6 +293,14 @@ export default function QuizScreen({ route, navigation }: Props) {
         });
     };
 
+    const goPrevious = () => {
+        if (currentIndex <= 0) {
+            return;
+        }
+
+        moveToQuestion(currentIndex - 1);
+    };
+
     const checkAnswer = async () => {
         if (!currentQuestion || !currentSolution || !sessionId) {
             return;
@@ -270,6 +323,15 @@ export default function QuizScreen({ route, navigation }: Props) {
         setIsCorrect(correct);
         setAnswered(true);
 
+        setQuestionUiStates((prev) => ({
+            ...prev,
+            [currentQuestion.id]: {
+                selectedChoiceIds,
+                answered: true,
+                isCorrect: correct,
+            },
+        }));
+
         if (correct) {
             setCorrectCount((prev) => prev + 1);
         }
@@ -287,10 +349,7 @@ export default function QuizScreen({ route, navigation }: Props) {
 
     const goNext = async () => {
         if (currentIndex + 1 < questions.length) {
-            setCurrentIndex((prev) => prev + 1);
-            setSelectedChoiceIds([]);
-            setAnswered(false);
-            setIsCorrect(null);
+            moveToQuestion(currentIndex + 1);
             return;
         }
 
@@ -298,7 +357,7 @@ export default function QuizScreen({ route, navigation }: Props) {
             return;
         }
 
-        const finalCorrectCount = correctCount + (isCorrect ? 1 : 0);
+        const finalCorrectCount = correctCount;
 
         const score =
             questions.length > 0
@@ -323,6 +382,65 @@ export default function QuizScreen({ route, navigation }: Props) {
             sessionId,
         });
     };
+
+    const handlePrimaryAction = async () => {
+        if (selectedChoiceIds.length === 0) {
+            await goNext();
+            return;
+        }
+
+        if (hasRequiredSelection) {
+            await checkAnswer();
+            return;
+        }
+
+        const remainingCount =
+            requiredSelectionCount - selectedChoiceIds.length;
+
+        Alert.alert(
+            "選択数が不足しています",
+            `あと${remainingCount}つ選択してください。`,
+        );
+    };
+
+    const primaryButtonText =
+        selectedChoiceIds.length === 0
+            ? "質問を飛ばす"
+            : hasRequiredSelection
+              ? "回答する"
+              : `あと${requiredSelectionCount - selectedChoiceIds.length}つ選択`;
+
+    const moveToQuestion = useCallback(
+        (nextIndex: number) => {
+            if (!currentQuestion) {
+                return;
+            }
+
+            setQuestionUiStates((prev) => {
+                const updatedStates = {
+                    ...prev,
+                    [currentQuestion.id]: {
+                        selectedChoiceIds,
+                        answered,
+                        isCorrect,
+                    },
+                };
+
+                const nextQuestion = questions[nextIndex];
+                const nextState = nextQuestion
+                    ? updatedStates[nextQuestion.id]
+                    : undefined;
+
+                setCurrentIndex(nextIndex);
+                setSelectedChoiceIds(nextState?.selectedChoiceIds ?? []);
+                setAnswered(nextState?.answered ?? false);
+                setIsCorrect(nextState?.isCorrect ?? null);
+
+                return updatedStates;
+            });
+        },
+        [currentQuestion, questions, selectedChoiceIds, answered, isCorrect],
+    );
 
     if (!currentQuestion) {
         return (
@@ -407,7 +525,19 @@ export default function QuizScreen({ route, navigation }: Props) {
             })}
 
             {!answered ? (
-                <AppButton onPress={checkAnswer}>回答する</AppButton>
+                <View style={styles.navigationRow}>
+                    {currentIndex > 0 && (
+                        <View style={styles.navigationButton}>
+                            <AppButton onPress={goPrevious}>戻る</AppButton>
+                        </View>
+                    )}
+
+                    <View style={styles.navigationButton}>
+                        <AppButton onPress={handlePrimaryAction}>
+                            {primaryButtonText}
+                        </AppButton>
+                    </View>
+                </View>
             ) : (
                 <View style={styles.resultBox}>
                     <Text style={isCorrect ? styles.correct : styles.incorrect}>
@@ -418,11 +548,21 @@ export default function QuizScreen({ route, navigation }: Props) {
                         {currentSolution?.explanationText}
                     </Text>
 
-                    <AppButton onPress={goNext}>
-                        {currentIndex + 1 < questions.length
-                            ? "次の問題へ"
-                            : "結果を見る"}
-                    </AppButton>
+                    <View style={styles.navigationRow}>
+                        {currentIndex > 0 && (
+                            <View style={styles.navigationButton}>
+                                <AppButton onPress={goPrevious}>戻る</AppButton>
+                            </View>
+                        )}
+
+                        <View style={styles.navigationButton}>
+                            <AppButton onPress={goNext}>
+                                {currentIndex + 1 < questions.length
+                                    ? "次の問題へ"
+                                    : "結果を見る"}
+                            </AppButton>
+                        </View>
+                    </View>
                 </View>
             )}
         </ScrollView>
@@ -432,7 +572,8 @@ export default function QuizScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
     container: {
         paddingHorizontal: 12,
-        paddingVertical: 16,
+        paddingTop: 16,
+        paddingBottom: 64,
         gap: 12,
     },
     progress: {
@@ -458,7 +599,7 @@ const styles = StyleSheet.create({
     questionText: {
         fontFamily: APP_FONT_FAMILY,
         fontSize: 18,
-        lineHeight: 36,
+        lineHeight: 30,
         fontWeight: "400",
         color: "#2f3349",
         letterSpacing: 0.2,
@@ -565,5 +706,15 @@ const styles = StyleSheet.create({
     explanation: {
         fontSize: 15,
         lineHeight: 22,
+    },
+    navigationRow: {
+        flexDirection: "row",
+        alignItems: "stretch",
+        gap: 12,
+        marginTop: 4,
+    },
+
+    navigationButton: {
+        flex: 1,
     },
 });
