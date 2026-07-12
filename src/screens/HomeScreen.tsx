@@ -237,8 +237,8 @@ const styles = StyleSheet.create({
     },
 
     appIcon: {
-        width: 120,
-        height: 120,
+        width: 180,
+        height: 180,
         marginBottom: 12,
     },
 
