@@ -41,5 +41,6 @@
     "typescript": "^5.9.3",
     "uuid": "9.0.1"
   },
-  "private": true
+  "private": true,
+  "packageManager": "npm@10.9.8"
 }
