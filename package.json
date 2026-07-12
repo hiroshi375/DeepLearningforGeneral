@@ -32,12 +32,14 @@
   "devDependencies": {
     "@aws-amplify/backend": "^1.23.0",
     "@aws-amplify/backend-cli": "^1.8.3",
+    "@opentelemetry/core": "2.0.0",
     "@types/react": "~19.1.0",
     "aws-cdk-lib": "^2.244.0",
     "constructs": "^10.6.0",
     "esbuild": "^0.28.1",
     "tsx": "^4.23.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "uuid": "9.0.1"
   },
   "private": true
 }
