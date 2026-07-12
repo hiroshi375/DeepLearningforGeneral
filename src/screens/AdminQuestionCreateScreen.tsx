@@ -40,6 +40,7 @@ export default function AdminQuestionCreateScreen({ navigation }: Props) {
     const [exams, setExams] = useState<ExamItem[]>([]);
     const [selectedExamId, setSelectedExamId] = useState("");
     const [questionText, setQuestionText] = useState("");
+    const [questionNo, setQuestionNo] = useState("");
     const [questionType, setQuestionType] = useState<"SINGLE" | "MULTIPLE">(
         "SINGLE",
     );
@@ -98,6 +99,15 @@ export default function AdminQuestionCreateScreen({ navigation }: Props) {
             Alert.alert("未選択", "問題セットを選択してください。");
             return;
         }
+        const parsedQuestionNo = Number(questionNo);
+
+        if (!Number.isInteger(parsedQuestionNo) || parsedQuestionNo <= 0) {
+            Alert.alert(
+                "入力エラー",
+                "問題番号は1以上の整数で入力してください。",
+            );
+            return;
+        }
 
         if (!questionText.trim()) {
             Alert.alert("未入力", "問題文を入力してください。");
@@ -133,8 +143,28 @@ export default function AdminQuestionCreateScreen({ navigation }: Props) {
         setSaving(true);
 
         try {
+            const duplicateResult = await client.models.Question.list({
+                filter: {
+                    examId: {
+                        eq: selectedExamId,
+                    },
+                    questionNo: {
+                        eq: parsedQuestionNo,
+                    },
+                },
+            });
+
+            if ((duplicateResult.data?.length ?? 0) > 0) {
+                Alert.alert(
+                    "重複エラー",
+                    "同じ問題セットに同じ問題番号の問題が既に登録されています。",
+                );
+                return;
+            }
+
             const questionResult = await client.models.Question.create({
                 examId: selectedExamId,
+                questionNo: parsedQuestionNo,
                 questionText: questionText.trim(),
                 questionType,
                 selectionMax:
@@ -189,6 +219,7 @@ export default function AdminQuestionCreateScreen({ navigation }: Props) {
                 {
                     text: "続けて登録",
                     onPress: () => {
+                        setQuestionNo(String(parsedQuestionNo + 1));
                         setQuestionText("");
                         setChoices(DEFAULT_CHOICES);
                         setCorrectLabelsText("A");
@@ -234,6 +265,15 @@ export default function AdminQuestionCreateScreen({ navigation }: Props) {
                             </Pressable>
                         ))}
                     </View>
+
+                    <Text style={styles.label}>問題番号</Text>
+                    <TextInput
+                        value={questionNo}
+                        onChangeText={setQuestionNo}
+                        keyboardType="number-pad"
+                        style={styles.input}
+                        placeholder="例: 1"
+                    />
 
                     <Text style={styles.label}>問題文</Text>
                     <TextInput

@@ -47,10 +47,24 @@ export default function HomeScreen({ navigation }: Props) {
                     問題セットを選ぶ
                 </AppButton>
 
-                {!checkingAdmin && isAdmin && (
-                    <View style={styles.adminBox}>
-                        <Text style={styles.adminTitle}>管理者メニュー</Text>
+                <AppButton onPress={() => navigation.navigate("QuizHistory")}>
+                    学習履歴
+                </AppButton>
 
+                <AppButton onPress={() => navigation.navigate("Review")}>
+                    復習
+                </AppButton>
+
+                <AppButton onPress={() => navigation.navigate("StudyStats")}>
+                    学習統計
+                </AppButton>
+
+                <AppButton onPress={() => navigation.navigate("Profile")}>
+                    プロフィール
+                </AppButton>
+
+                {!checkingAdmin && isAdmin && (
+                    <>
                         <AppButton
                             variant="admin"
                             onPress={() => navigation.navigate("AdminExamList")}
@@ -75,24 +89,8 @@ export default function HomeScreen({ navigation }: Props) {
                         >
                             問題一括登録
                         </AppButton>
-                    </View>
+                    </>
                 )}
-
-                <AppButton onPress={() => navigation.navigate("QuizHistory")}>
-                    学習履歴
-                </AppButton>
-
-                <AppButton onPress={() => navigation.navigate("Review")}>
-                    復習
-                </AppButton>
-
-                <AppButton onPress={() => navigation.navigate("StudyStats")}>
-                    学習統計
-                </AppButton>
-
-                <AppButton onPress={() => navigation.navigate("Profile")}>
-                    プロフィール
-                </AppButton>
 
                 <AppButton mode="outlined" onPress={handleSignOut}>
                     サインアウト
@@ -137,19 +135,5 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 22,
         color: "#4b5563",
-    },
-    adminBox: {
-        marginTop: 12,
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: "#d8dce8",
-        backgroundColor: "#f8fafc",
-        gap: 10,
-    },
-    adminTitle: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#1f2937",
     },
 });

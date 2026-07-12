@@ -26,13 +26,14 @@ const schema = a.schema({
     Question: a
         .model({
             examId: a.id().required(),
+            questionNo: a.integer().required(),
             questionText: a.string().required(),
-            questionType: a.string().default("SINGLE"),
-            selectionMax: a.integer().default(1),
-            score: a.integer().default(1),
             category: a.string(),
             difficulty: a.string(),
-            status: a.string().default("DRAFT"),
+            questionType: a.string(),
+            selectionMax: a.integer(),
+            score: a.integer(),
+            status: a.string(),
         })
         .authorization((allow) => [
             allow.authenticated().to(["read"]),

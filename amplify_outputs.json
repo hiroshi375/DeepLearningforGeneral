@@ -182,11 +182,32 @@
               "isRequired": true,
               "attributes": []
             },
+            "questionNo": {
+              "name": "questionNo",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": true,
+              "attributes": []
+            },
             "questionText": {
               "name": "questionText",
               "isArray": false,
               "type": "String",
               "isRequired": true,
+              "attributes": []
+            },
+            "category": {
+              "name": "category",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "difficulty": {
+              "name": "difficulty",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
               "attributes": []
             },
             "questionType": {
@@ -207,20 +228,6 @@
               "name": "score",
               "isArray": false,
               "type": "Int",
-              "isRequired": false,
-              "attributes": []
-            },
-            "category": {
-              "name": "category",
-              "isArray": false,
-              "type": "String",
-              "isRequired": false,
-              "attributes": []
-            },
-            "difficulty": {
-              "name": "difficulty",
-              "isArray": false,
-              "type": "String",
               "isRequired": false,
               "attributes": []
             },

@@ -19,6 +19,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "Quiz">;
 
 type QuestionItem = {
     id: string;
+    questionNo?: number | null;
     questionText?: string | null;
     questionType?: string | null;
     selectionMax?: number | null;
@@ -69,6 +70,8 @@ export default function QuizScreen({ route, navigation }: Props) {
     const [exam, setExam] = useState<ExamItem | null>(null);
 
     const currentQuestion = questions[currentIndex];
+
+    const displayQuestionNo = currentQuestion?.questionNo ?? currentIndex + 1;
 
     const currentChoices = useMemo(() => {
         if (!currentQuestion) {
@@ -166,7 +169,13 @@ export default function QuizScreen({ route, navigation }: Props) {
                 },
             });
 
-            const questionData = (questionResult.data ?? []) as QuestionItem[];
+            const questionData = (
+                (questionResult.data ?? []) as QuestionItem[]
+            ).sort(
+                (a, b) =>
+                    (a.questionNo ?? Number.MAX_SAFE_INTEGER) -
+                    (b.questionNo ?? Number.MAX_SAFE_INTEGER),
+            );
 
             setQuestions(questionData);
 
@@ -329,7 +338,15 @@ export default function QuizScreen({ route, navigation }: Props) {
                 {currentIndex + 1} / {questions.length}
             </Text>
 
-            <Text style={styles.question}>{currentQuestion.questionText}</Text>
+            <View style={styles.questionSection}>
+                <Text style={styles.questionNumber}>
+                    問題{displayQuestionNo}:
+                </Text>
+
+                <Text style={styles.questionText}>
+                    {currentQuestion.questionText}
+                </Text>
+            </View>
 
             {currentChoices.map((choice) => {
                 const selected = selectedChoiceIds.includes(choice.id);
@@ -424,13 +441,26 @@ const styles = StyleSheet.create({
         color: "#25283a",
         fontWeight: "700",
     },
-    question: {
+    questionSection: {
+        marginTop: 8,
+        marginBottom: 16,
+    },
+
+    questionNumber: {
+        fontFamily: APP_FONT_FAMILY,
+        fontSize: 20,
+        lineHeight: 28,
+        fontWeight: "700",
+        color: "#2f3349",
+        marginBottom: 14,
+    },
+
+    questionText: {
         fontFamily: APP_FONT_FAMILY,
         fontSize: 18,
-        lineHeight: 30,
-        fontWeight: "700",
-        color: "#25283a",
-        marginBottom: 18,
+        lineHeight: 36,
+        fontWeight: "400",
+        color: "#2f3349",
         letterSpacing: 0.2,
     },
     choice: {
