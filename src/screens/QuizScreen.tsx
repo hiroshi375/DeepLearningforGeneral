@@ -81,7 +81,8 @@ export default function QuizScreen({ route, navigation }: Props) {
     const currentQuestion = questions[currentIndex];
 
     const displayQuestionNo = currentQuestion?.questionNo ?? currentIndex + 1;
-
+    const progressRate =
+        questions.length > 0 ? (currentIndex + 1) / questions.length : 0;
     const currentChoices = useMemo(() => {
         if (!currentQuestion) {
             return [];
@@ -452,10 +453,22 @@ export default function QuizScreen({ route, navigation }: Props) {
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
-            <Text style={styles.progress}>
-                {currentIndex + 1} / {questions.length}
-            </Text>
+            <View style={styles.progressSection}>
+                <Text style={styles.progressText}>
+                    {currentIndex + 1}/{questions.length}
+                </Text>
 
+                <View style={styles.progressBarTrack}>
+                    <View
+                        style={[
+                            styles.progressBarFill,
+                            {
+                                width: `${progressRate * 100}%`,
+                            },
+                        ]}
+                    />
+                </View>
+            </View>
             <View style={styles.questionSection}>
                 <Text style={styles.questionNumber}>
                     問題{displayQuestionNo}:
@@ -576,11 +589,34 @@ const styles = StyleSheet.create({
         paddingBottom: 64,
         gap: 12,
     },
-    progress: {
+    progressSection: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        marginBottom: 12,
+    },
+
+    progressText: {
         fontFamily: APP_FONT_FAMILY,
-        fontSize: 16,
-        color: "#25283a",
+        fontSize: 18,
+        lineHeight: 26,
+        color: "#2f3349",
         fontWeight: "700",
+        minWidth: 44,
+    },
+
+    progressBarTrack: {
+        flex: 1,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: "#d8dae6",
+        overflow: "hidden",
+    },
+
+    progressBarFill: {
+        height: "100%",
+        borderRadius: 6,
+        backgroundColor: "#6d28d9",
     },
     questionSection: {
         marginTop: 8,
