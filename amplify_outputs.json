@@ -821,7 +821,29 @@
         }
       },
       "enums": {},
-      "nonModels": {}
+      "nonModels": {},
+      "queries": {
+        "extractQuestionFromImages": {
+          "name": "extractQuestionFromImages",
+          "isArray": false,
+          "type": "String",
+          "isRequired": false,
+          "arguments": {
+            "questionImagePath": {
+              "name": "questionImagePath",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "explanationImagePath": {
+              "name": "explanationImagePath",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        }
+      }
     }
   },
   "storage": {
@@ -840,6 +862,14 @@
               "write",
               "delete"
             ],
+            "groupsAdmins": [
+              "get",
+              "list",
+              "write",
+              "delete"
+            ]
+          },
+          "question-import-images/*": {
             "groupsAdmins": [
               "get",
               "list",

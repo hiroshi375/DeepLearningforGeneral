@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
     Alert,
     Platform,
@@ -6,6 +6,8 @@ import {
     StyleSheet,
     Text,
     View,
+    Image,
+    TextInput,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
@@ -17,6 +19,10 @@ import * as FileSystem from "expo-file-system/legacy";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
+import { getCurrentUser } from "aws-amplify/auth";
+import { uploadData } from "aws-amplify/storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type Props = NativeStackScreenProps<RootStackParamList, "AdminQuestionImport">;
 type ExamItem = {
@@ -49,6 +55,45 @@ type SolutionItem = {
     explanationText?: string | null;
 };
 
+type ExtractedChoice = {
+    label: string;
+    choiceText: string;
+};
+
+type ExtractedQuestion = {
+    examCode: string;
+    questionNo: number | null;
+    questionText: string;
+    category: string | null;
+    difficulty: string;
+    questionType: string;
+    correctLabels: string[];
+    explanation: string;
+    choices: ExtractedChoice[];
+};
+
+type QuestionImportChoiceInput = {
+    label: string;
+    choiceText: string;
+};
+
+type QuestionImportInput = {
+    examCode: string;
+    questionNo: number | null;
+    questionText: string;
+    category?: string | null;
+    difficulty?: string | null;
+    questionType?: string | null;
+    correctLabels: string[];
+    explanation?: string | null;
+    choices: QuestionImportChoiceInput[];
+};
+
+type SaveQuestionImportResult = {
+    status: "created" | "updated" | "skipped";
+    examId?: string;
+};
+
 const CSV_TEMPLATE_HEADER =
     "examCode,questionNo,questionText,category,difficulty,questionType,correctLabels,explanation,A,B,C,D";
 
@@ -56,6 +101,8 @@ const CSV_TEMPLATE_SAMPLE =
     'G-001,1,"ディープラーニングに関する説明として正しいものはどれか",ディープラーニング,NORMAL,SINGLE,A,"多層のニューラルネットワークを用いる手法です","多層のニューラルネットワークを用いる手法","ルールベースのみで判断する手法","データベースの正規化手法","画面デザインの手法"';
 
 const CSV_TEMPLATE_TEXT = `${CSV_TEMPLATE_HEADER}\n${CSV_TEMPLATE_SAMPLE}\n`;
+
+const PENDING_IMPORT_IMAGE_TYPE_KEY = "adminQuestionImport.pendingImageType";
 
 function parseCsvLine(line: string): string[] {
     const result: string[] = [];
@@ -211,6 +258,18 @@ async function updateExamTotalQuestions(examId: string) {
 
 export default function AdminQuestionImportScreen({ navigation }: Props) {
     const [importing, setImporting] = useState(false);
+    const [questionImageUri, setQuestionImageUri] = useState<string | null>(
+        null,
+    );
+    const [explanationImageUri, setExplanationImageUri] = useState<
+        string | null
+    >(null);
+    const [pendingImageType, setPendingImageType] = useState<
+        "question" | "explanation" | null
+    >(null);
+    const [extracting, setExtracting] = useState(false);
+    const [extractedQuestion, setExtractedQuestion] =
+        useState<ExtractedQuestion | null>(null);
 
     const saveOrShareCsvFile = async ({
         filename,
@@ -443,6 +502,240 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
         }
     };
 
+    const saveQuestionImportInput = async (
+        input: QuestionImportInput,
+    ): Promise<SaveQuestionImportResult> => {
+        const examCode = input.examCode.replace(/^\uFEFF/, "").trim();
+        const questionNo = input.questionNo;
+        const questionText = input.questionText.trim();
+
+        if (
+            !examCode ||
+            !Number.isInteger(questionNo) ||
+            questionNo == null ||
+            questionNo <= 0 ||
+            !questionText
+        ) {
+            return {
+                status: "skipped",
+            };
+        }
+
+        const examId = await loadExamIdByCode(examCode);
+
+        console.log("[ImportQuestions] resolved exam:", {
+            examCode,
+            examId,
+        });
+
+        if (!examId) {
+            console.warn("[ImportQuestions] exam code not found:", examCode);
+            return {
+                status: "skipped",
+            };
+        }
+
+        const validChoices = input.choices
+            .map((choice, index) => ({
+                label:
+                    choice.label?.trim().toUpperCase() ||
+                    String.fromCharCode(65 + index),
+                choiceText: choice.choiceText.trim(),
+            }))
+            .filter((choice) => choice.choiceText);
+
+        if (validChoices.length < 2) {
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        const normalizedQuestionType =
+            input.questionType === "MULTIPLE" ? "MULTIPLE" : "SINGLE";
+
+        const correctLabels = input.correctLabels
+            .map((label) => label.trim().toUpperCase())
+            .filter(Boolean);
+
+        if (correctLabels.length === 0) {
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        const validChoiceLabels = new Set(
+            validChoices.map((choice) => choice.label),
+        );
+
+        const hasInvalidCorrectLabel = correctLabels.some(
+            (label) => !validChoiceLabels.has(label),
+        );
+
+        if (hasInvalidCorrectLabel) {
+            console.warn("[ImportQuestions] invalid correct labels:", {
+                correctLabels,
+                validChoiceLabels: Array.from(validChoiceLabels),
+            });
+
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        const existingQuestion = await loadQuestionByExamAndNo(
+            examId,
+            questionNo,
+        );
+
+        const wasUpdated = Boolean(existingQuestion?.id);
+
+        let questionId: string | null = null;
+
+        if (existingQuestion?.id) {
+            console.log("[ImportQuestions] update existing question:", {
+                examCode,
+                examId,
+                questionNo,
+                questionId: existingQuestion.id,
+            });
+
+            const updateResult = await client.models.Question.update({
+                id: existingQuestion.id,
+                examId,
+                questionNo,
+                questionText,
+                category: input.category || undefined,
+                difficulty: input.difficulty || undefined,
+                questionType: normalizedQuestionType,
+                selectionMax:
+                    normalizedQuestionType === "MULTIPLE"
+                        ? correctLabels.length
+                        : 1,
+                score: 1,
+                status: "PUBLISHED",
+            });
+
+            if (updateResult.errors) {
+                console.error(
+                    "[ImportQuestions] question update errors:",
+                    updateResult.errors,
+                );
+
+                return {
+                    status: "skipped",
+                    examId,
+                };
+            }
+
+            questionId = existingQuestion.id;
+
+            await deleteQuestionChildren(questionId);
+        } else {
+            console.log("[ImportQuestions] create new question:", {
+                examCode,
+                examId,
+                questionNo,
+            });
+
+            const createResult = await client.models.Question.create({
+                examId,
+                questionNo,
+                questionText,
+                category: input.category || undefined,
+                difficulty: input.difficulty || undefined,
+                questionType: normalizedQuestionType,
+                selectionMax:
+                    normalizedQuestionType === "MULTIPLE"
+                        ? correctLabels.length
+                        : 1,
+                score: 1,
+                status: "PUBLISHED",
+            });
+
+            if (createResult.errors) {
+                console.error(
+                    "[ImportQuestions] question create errors:",
+                    createResult.errors,
+                );
+
+                return {
+                    status: "skipped",
+                    examId,
+                };
+            }
+
+            questionId = createResult.data?.id ?? null;
+        }
+
+        if (!questionId) {
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        const labelToChoiceId = new Map<string, string>();
+
+        for (let index = 0; index < validChoices.length; index += 1) {
+            const choice = validChoices[index];
+
+            const choiceResult = await client.models.Choice.create({
+                questionId,
+                label: choice.label,
+                choiceText: choice.choiceText,
+                displayOrder: index + 1,
+            });
+
+            if (choiceResult.errors) {
+                console.error(
+                    "[ImportQuestions] choice create errors:",
+                    choiceResult.errors,
+                );
+            }
+
+            if (choiceResult.data?.id) {
+                labelToChoiceId.set(choice.label, choiceResult.data.id);
+            }
+        }
+
+        const correctChoiceIds = correctLabels
+            .map((label) => labelToChoiceId.get(label))
+            .filter((id): id is string => Boolean(id));
+
+        if (correctChoiceIds.length === 0) {
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        const solutionResult = await client.models.QuestionSolution.create({
+            questionId,
+            correctChoiceIds,
+            explanationText: input.explanation || undefined,
+        });
+
+        if (solutionResult.errors) {
+            console.error(
+                "[ImportQuestions] solution create errors:",
+                solutionResult.errors,
+            );
+
+            return {
+                status: "skipped",
+                examId,
+            };
+        }
+
+        return {
+            status: wasUpdated ? "updated" : "created",
+            examId,
+        };
+    };
+
     const importCsvText = async (selectedCsvText: string) => {
         console.log("[ImportQuestions] importCsvText start");
         console.log(
@@ -501,6 +794,7 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
 
             for (const line of dataLines) {
                 console.log("[ImportQuestions] processing line:", line);
+
                 const [
                     examCode,
                     questionNoText,
@@ -517,6 +811,7 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
 
                 console.log("[ImportQuestions] parsed row:", {
                     examCode,
+                    questionNo,
                     questionText,
                     category,
                     difficulty,
@@ -527,191 +822,42 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
                     choiceTexts,
                 });
 
-                if (
-                    !examCode ||
-                    !Number.isInteger(questionNo) ||
-                    questionNo <= 0 ||
-                    !questionText ||
-                    choiceTexts.length < 2
-                ) {
-                    skipCount += 1;
-                    continue;
-                }
-
-                const examId = await loadExamIdByCode(examCode);
-
-                console.log("[ImportQuestions] resolved exam:", {
-                    examCode,
-                    examId,
-                });
-
-                if (!examId) {
-                    console.warn(
-                        "[ImportQuestions] exam code not found:",
-                        examCode,
-                    );
-                    skipCount += 1;
-                    continue;
-                }
-
-                const validChoiceTexts = choiceTexts.filter(Boolean);
-
-                if (validChoiceTexts.length < 2) {
-                    skipCount += 1;
-                    continue;
-                }
-
-                const normalizedQuestionType =
-                    questionType === "MULTIPLE" ? "MULTIPLE" : "SINGLE";
-
                 const correctLabels = correctLabelsText
                     .split("|")
                     .map((value) => value.trim().toUpperCase())
                     .filter(Boolean);
 
-                if (correctLabels.length === 0) {
-                    skipCount += 1;
-                    continue;
-                }
+                const choices = choiceTexts
+                    .map((choiceText, index) => ({
+                        label: String.fromCharCode(65 + index),
+                        choiceText,
+                    }))
+                    .filter((choice) => choice.choiceText.trim());
 
-                const existingQuestion = await loadQuestionByExamAndNo(
-                    examId,
+                const saveResult = await saveQuestionImportInput({
+                    examCode,
                     questionNo,
-                );
+                    questionText,
+                    category,
+                    difficulty,
+                    questionType,
+                    correctLabels,
+                    explanation: explanationText,
+                    choices,
+                });
 
-                const wasUpdated = Boolean(existingQuestion?.id);
-
-                let questionId: string | null = null;
-
-                if (existingQuestion?.id) {
-                    console.log("[ImportQuestions] update existing question:", {
-                        examCode,
-                        examId,
-                        questionNo,
-                        questionId: existingQuestion.id,
-                    });
-
-                    const updateResult = await client.models.Question.update({
-                        id: existingQuestion.id,
-                        examId,
-                        questionNo,
-                        questionText,
-                        category: category || undefined,
-                        difficulty: difficulty || undefined,
-                        questionType: normalizedQuestionType,
-                        selectionMax:
-                            normalizedQuestionType === "MULTIPLE"
-                                ? correctLabels.length
-                                : 1,
-                        score: 1,
-                        status: "PUBLISHED",
-                    });
-
-                    if (updateResult.errors) {
-                        console.error(
-                            "[ImportQuestions] question update errors:",
-                            updateResult.errors,
-                        );
-                        skipCount += 1;
-                        continue;
-                    }
-
-                    questionId = existingQuestion.id;
-
-                    await deleteQuestionChildren(questionId);
-                } else {
-                    console.log("[ImportQuestions] create new question:", {
-                        examCode,
-                        examId,
-                        questionNo,
-                    });
-
-                    const createResult = await client.models.Question.create({
-                        examId,
-                        questionNo,
-                        questionText,
-                        category: category || undefined,
-                        difficulty: difficulty || undefined,
-                        questionType: normalizedQuestionType,
-                        selectionMax:
-                            normalizedQuestionType === "MULTIPLE"
-                                ? correctLabels.length
-                                : 1,
-                        score: 1,
-                        status: "PUBLISHED",
-                    });
-
-                    if (createResult.errors) {
-                        console.error(
-                            "[ImportQuestions] question create errors:",
-                            createResult.errors,
-                        );
-                        skipCount += 1;
-                        continue;
-                    }
-
-                    questionId = createResult.data?.id ?? null;
+                if (saveResult.examId) {
+                    importedExamIds.add(saveResult.examId);
                 }
 
-                if (!questionId) {
-                    skipCount += 1;
-                    continue;
-                }
-
-                const labelToChoiceId = new Map<string, string>();
-
-                for (
-                    let index = 0;
-                    index < validChoiceTexts.length;
-                    index += 1
-                ) {
-                    const label = String.fromCharCode(65 + index);
-
-                    const choiceResult = await client.models.Choice.create({
-                        questionId,
-                        label,
-                        choiceText: validChoiceTexts[index],
-                        displayOrder: index + 1,
-                    });
-
-                    if (choiceResult.data?.id) {
-                        labelToChoiceId.set(label, choiceResult.data.id);
-                    }
-                }
-
-                const correctChoiceIds = correctLabels
-                    .map((label) => labelToChoiceId.get(label))
-                    .filter((id): id is string => Boolean(id));
-
-                if (correctChoiceIds.length === 0) {
-                    skipCount += 1;
-                    continue;
-                }
-
-                const solutionResult =
-                    await client.models.QuestionSolution.create({
-                        questionId,
-                        correctChoiceIds,
-                        explanationText: explanationText || undefined,
-                    });
-
-                if (solutionResult.errors) {
-                    console.error(
-                        "[ImportQuestions] solution create errors:",
-                        solutionResult.errors,
-                    );
-                    skipCount += 1;
-                    continue;
-                }
-
-                importedExamIds.add(examId);
-                if (wasUpdated) {
+                if (saveResult.status === "created") {
+                    createCount += 1;
+                } else if (saveResult.status === "updated") {
                     updateCount += 1;
                 } else {
-                    createCount += 1;
+                    skipCount += 1;
                 }
             }
-
             for (const importedExamId of importedExamIds) {
                 await updateExamTotalQuestions(importedExamId);
             }
@@ -823,6 +969,262 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
         }
     }
 
+    const applyPickedImage = (
+        imageType: "question" | "explanation",
+        uri: string,
+    ) => {
+        if (imageType === "question") {
+            setQuestionImageUri(uri);
+            return;
+        }
+
+        setExplanationImageUri(uri);
+    };
+
+    const takeImage = async (imageType: "question" | "explanation") => {
+        const permissionResult =
+            await ImagePicker.requestCameraPermissionsAsync();
+
+        if (!permissionResult.granted) {
+            Alert.alert(
+                "権限が必要です",
+                "カメラを使用するにはカメラ権限が必要です。",
+            );
+            return;
+        }
+
+        try {
+            setPendingImageType(imageType);
+
+            await AsyncStorage.setItem(
+                PENDING_IMPORT_IMAGE_TYPE_KEY,
+                imageType,
+            );
+
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.9,
+            });
+
+            if (result.canceled || result.assets.length === 0) {
+                return;
+            }
+
+            applyPickedImage(imageType, result.assets[0].uri);
+        } finally {
+            await AsyncStorage.removeItem(PENDING_IMPORT_IMAGE_TYPE_KEY);
+            setPendingImageType(null);
+        }
+    };
+
+    const takeQuestionImage = async () => {
+        await takeImage("question");
+    };
+
+    const takeExplanationImage = async () => {
+        await takeImage("explanation");
+    };
+
+    useEffect(() => {
+        const restorePendingImagePickerResult = async () => {
+            if (Platform.OS !== "android") {
+                return;
+            }
+
+            try {
+                const pendingResult = await ImagePicker.getPendingResultAsync();
+
+                if (!pendingResult) {
+                    return;
+                }
+
+                if (!("canceled" in pendingResult)) {
+                    console.warn(
+                        "ImagePicker pending result error:",
+                        pendingResult,
+                    );
+                    return;
+                }
+
+                if (
+                    pendingResult.canceled ||
+                    pendingResult.assets.length === 0
+                ) {
+                    return;
+                }
+
+                const storedImageType = await AsyncStorage.getItem(
+                    PENDING_IMPORT_IMAGE_TYPE_KEY,
+                );
+
+                const imageType =
+                    storedImageType === "question" ||
+                    storedImageType === "explanation"
+                        ? storedImageType
+                        : pendingImageType;
+
+                const uri = pendingResult.assets[0].uri;
+
+                if (imageType) {
+                    applyPickedImage(imageType, uri);
+                } else if (!questionImageUri) {
+                    setQuestionImageUri(uri);
+                } else if (!explanationImageUri) {
+                    setExplanationImageUri(uri);
+                }
+
+                await AsyncStorage.removeItem(PENDING_IMPORT_IMAGE_TYPE_KEY);
+            } catch (error) {
+                console.error(
+                    "Restore pending image picker result error:",
+                    error,
+                );
+            }
+        };
+
+        void restorePendingImagePickerResult();
+    }, [pendingImageType, questionImageUri, explanationImageUri]);
+
+    const uploadImportImage = async (
+        localUri: string,
+        imageType: "question" | "explanation",
+    ): Promise<string> => {
+        const currentUser = await getCurrentUser();
+
+        const response = await fetch(localUri);
+        const blob = await response.blob();
+
+        const path = `question-import-images/${currentUser.userId}/${Date.now()}-${imageType}.jpg`;
+
+        await uploadData({
+            path,
+            data: blob,
+            options: {
+                contentType: "image/jpeg",
+            },
+        }).result;
+
+        return path;
+    };
+
+    const extractQuestionFromImages = async () => {
+        if (!questionImageUri || !explanationImageUri) {
+            Alert.alert(
+                "画像が不足しています",
+                "問題画像と解説画像を撮影してください。",
+            );
+            return;
+        }
+
+        try {
+            setExtracting(true);
+
+            const questionImagePath = await uploadImportImage(
+                questionImageUri,
+                "question",
+            );
+
+            const explanationImagePath = await uploadImportImage(
+                explanationImageUri,
+                "explanation",
+            );
+
+            const result = await client.queries.extractQuestionFromImages({
+                questionImagePath,
+                explanationImagePath,
+            });
+
+            if (result.errors || !result.data) {
+                console.error(
+                    "extractQuestionFromImages errors:",
+                    result.errors,
+                );
+                Alert.alert("エラー", "画像の読み取りに失敗しました。");
+                return;
+            }
+
+            const parsed = JSON.parse(result.data) as ExtractedQuestion;
+            setExtractedQuestion(parsed);
+        } catch (error) {
+            console.error("Extract question error:", error);
+            Alert.alert("エラー", "画像の読み取りに失敗しました。");
+        } finally {
+            setExtracting(false);
+        }
+    };
+
+    const saveExtractedQuestion = async () => {
+        if (!extractedQuestion) {
+            Alert.alert("未読み取り", "先に画像から問題を読み取ってください。");
+            return;
+        }
+
+        if (
+            !extractedQuestion.examCode.trim() ||
+            !extractedQuestion.questionNo ||
+            !extractedQuestion.questionText.trim()
+        ) {
+            Alert.alert(
+                "入力不足",
+                "試験コード、問題番号、問題文を入力してください。",
+            );
+            return;
+        }
+
+        try {
+            setImporting(true);
+
+            const saveResult = await saveQuestionImportInput({
+                examCode: extractedQuestion.examCode,
+                questionNo: extractedQuestion.questionNo,
+                questionText: extractedQuestion.questionText,
+                category: extractedQuestion.category,
+                difficulty: extractedQuestion.difficulty,
+                questionType: extractedQuestion.questionType,
+                correctLabels: extractedQuestion.correctLabels,
+                explanation: extractedQuestion.explanation,
+                choices: extractedQuestion.choices,
+            });
+
+            if (saveResult.status === "skipped" || !saveResult.examId) {
+                Alert.alert(
+                    "登録できませんでした",
+                    "試験コード、問題番号、選択肢、正解ラベルを確認してください。",
+                );
+                return;
+            }
+
+            await updateExamTotalQuestions(saveResult.examId);
+
+            Alert.alert(
+                "登録完了",
+                saveResult.status === "updated"
+                    ? "既存の問題を更新しました。"
+                    : "新しい問題を登録しました。",
+                [
+                    {
+                        text: "続けて登録",
+                        onPress: () => {
+                            setQuestionImageUri(null);
+                            setExplanationImageUri(null);
+                            setExtractedQuestion(null);
+                        },
+                    },
+                    {
+                        text: "問題一覧へ",
+                        onPress: () => navigation.navigate("AdminQuestionList"),
+                    },
+                ],
+            );
+        } catch (error) {
+            console.error("Save extracted question error:", error);
+            Alert.alert("エラー", "読み取り結果の登録に失敗しました。");
+        } finally {
+            setImporting(false);
+        }
+    };
+
     return (
         <AdminOnly onBack={() => navigation.navigate("Home")}>
             <View style={styles.container}>
@@ -851,6 +1253,193 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
                         問題文をエクスポートする
                     </AppButton>
 
+                    <View style={styles.ocrSection}>
+                        <Text style={styles.sectionTitle}>
+                            画像から問題を作成
+                        </Text>
+
+                        <AppButton onPress={takeQuestionImage}>
+                            問題画像を撮影
+                        </AppButton>
+
+                        {questionImageUri && (
+                            <Image
+                                source={{ uri: questionImageUri }}
+                                style={styles.previewImage}
+                                resizeMode="cover"
+                            />
+                        )}
+
+                        <AppButton onPress={takeExplanationImage}>
+                            解説画像を撮影
+                        </AppButton>
+
+                        {explanationImageUri && (
+                            <Image
+                                source={{ uri: explanationImageUri }}
+                                style={styles.previewImage}
+                                resizeMode="cover"
+                            />
+                        )}
+
+                        <AppButton
+                            onPress={extractQuestionFromImages}
+                            disabled={
+                                !questionImageUri ||
+                                !explanationImageUri ||
+                                extracting
+                            }
+                        >
+                            {extracting
+                                ? "読み取り中..."
+                                : "画像から問題を読み取る"}
+                        </AppButton>
+                    </View>
+
+                    {extractedQuestion && (
+                        <View style={styles.extractedForm}>
+                            <Text style={styles.sectionTitle}>
+                                読み取り結果
+                            </Text>
+
+                            <Text style={styles.label}>試験コード</Text>
+                            <TextInput
+                                value={extractedQuestion.examCode}
+                                onChangeText={(text) =>
+                                    setExtractedQuestion((prev) =>
+                                        prev
+                                            ? { ...prev, examCode: text }
+                                            : prev,
+                                    )
+                                }
+                                style={styles.input}
+                            />
+
+                            <Text style={styles.label}>問題番号</Text>
+                            <TextInput
+                                value={
+                                    extractedQuestion.questionNo == null
+                                        ? ""
+                                        : String(extractedQuestion.questionNo)
+                                }
+                                onChangeText={(text) =>
+                                    setExtractedQuestion((prev) =>
+                                        prev
+                                            ? {
+                                                  ...prev,
+                                                  questionNo:
+                                                      Number(text) || null,
+                                              }
+                                            : prev,
+                                    )
+                                }
+                                keyboardType="number-pad"
+                                style={styles.input}
+                            />
+
+                            <Text style={styles.label}>問題文</Text>
+                            <TextInput
+                                value={extractedQuestion.questionText}
+                                onChangeText={(text) =>
+                                    setExtractedQuestion((prev) =>
+                                        prev
+                                            ? { ...prev, questionText: text }
+                                            : prev,
+                                    )
+                                }
+                                style={[styles.input, styles.multilineInput]}
+                                multiline
+                            />
+
+                            <Text style={styles.label}>選択肢</Text>
+
+                            {extractedQuestion.choices.map((choice, index) => (
+                                <View
+                                    key={choice.label}
+                                    style={styles.choiceEditRow}
+                                >
+                                    <Text style={styles.choiceLabel}>
+                                        {choice.label}
+                                    </Text>
+                                    <TextInput
+                                        value={choice.choiceText}
+                                        onChangeText={(text) =>
+                                            setExtractedQuestion((prev) => {
+                                                if (!prev) {
+                                                    return prev;
+                                                }
+
+                                                const nextChoices = [
+                                                    ...prev.choices,
+                                                ];
+                                                nextChoices[index] = {
+                                                    ...nextChoices[index],
+                                                    choiceText: text,
+                                                };
+
+                                                return {
+                                                    ...prev,
+                                                    choices: nextChoices,
+                                                };
+                                            })
+                                        }
+                                        style={[
+                                            styles.input,
+                                            styles.choiceInput,
+                                        ]}
+                                        multiline
+                                    />
+                                </View>
+                            ))}
+
+                            <Text style={styles.label}>正解ラベル</Text>
+                            <TextInput
+                                value={extractedQuestion.correctLabels.join(
+                                    "|",
+                                )}
+                                onChangeText={(text) =>
+                                    setExtractedQuestion((prev) =>
+                                        prev
+                                            ? {
+                                                  ...prev,
+                                                  correctLabels: text
+                                                      .split("|")
+                                                      .map((label) =>
+                                                          label
+                                                              .trim()
+                                                              .toUpperCase(),
+                                                      )
+                                                      .filter(Boolean),
+                                              }
+                                            : prev,
+                                    )
+                                }
+                                placeholder="例: A または A|C"
+                                style={styles.input}
+                            />
+
+                            <Text style={styles.label}>解説</Text>
+                            <TextInput
+                                value={extractedQuestion.explanation}
+                                onChangeText={(text) =>
+                                    setExtractedQuestion((prev) =>
+                                        prev
+                                            ? { ...prev, explanation: text }
+                                            : prev,
+                                    )
+                                }
+                                style={[styles.input, styles.multilineInput]}
+                                multiline
+                            />
+
+                            <AppButton
+                                disabled={importing}
+                                onPress={saveExtractedQuestion}
+                            >
+                                {importing ? "登録中..." : "確認して登録"}
+                            </AppButton>
+                        </View>
+                    )}
                     <AppButton disabled={importing} onPress={importCsv}>
                         {importing ? "登録中..." : "インポートする"}
                     </AppButton>
@@ -883,5 +1472,71 @@ const styles = StyleSheet.create({
         backgroundColor: "#f3f4f6",
         padding: 10,
         borderRadius: 8,
+    },
+
+    ocrSection: {
+        marginTop: 24,
+        gap: 12,
+    },
+
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#2f3349",
+        marginBottom: 4,
+    },
+
+    previewImage: {
+        width: "100%",
+        height: 220,
+        borderRadius: 8,
+        backgroundColor: "#eef2f7",
+    },
+
+    extractedForm: {
+        marginTop: 24,
+        gap: 10,
+    },
+
+    label: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: "#374151",
+    },
+
+    input: {
+        borderWidth: 1,
+        borderColor: "#d8dce8",
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 15,
+        backgroundColor: "#ffffff",
+        color: "#111827",
+    },
+
+    multilineInput: {
+        minHeight: 120,
+        textAlignVertical: "top",
+    },
+
+    choiceEditRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+    },
+
+    choiceLabel: {
+        width: 24,
+        paddingTop: 12,
+        fontSize: 16,
+        fontWeight: "700",
+        color: "#2f3349",
+    },
+
+    choiceInput: {
+        flex: 1,
+        minHeight: 64,
+        textAlignVertical: "top",
     },
 });

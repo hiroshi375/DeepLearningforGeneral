@@ -7,5 +7,8 @@ export const storage = defineStorage({
             allow.authenticated.to(["read", "write", "delete"]),
             allow.groups(["Admins"]).to(["read", "write", "delete"]),
         ],
+        "question-import-images/*": [
+            allow.groups(["Admins"]).to(["read", "write", "delete"]),
+        ],
     }),
 });

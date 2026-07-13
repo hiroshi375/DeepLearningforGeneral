@@ -1,5 +1,5 @@
 import { type ClientSchema, a, defineData } from "@aws-amplify/backend";
-
+import { extractQuestionFromImages } from "../functions/extractQuestionFromImages/resource";
 /*== STEP 1 ===============================================================
 The section below creates a Todo database table with a "content" field. Try
 adding a new "isDone" field as a boolean. The authorization rule below
@@ -39,6 +39,16 @@ const schema = a.schema({
             allow.authenticated().to(["read"]),
             allow.groups(["Admins"]),
         ]),
+
+    extractQuestionFromImages: a
+        .query()
+        .arguments({
+            questionImagePath: a.string().required(),
+            explanationImagePath: a.string().required(),
+        })
+        .returns(a.string())
+        .authorization((allow) => [allow.groups(["Admins"])])
+        .handler(a.handler.function(extractQuestionFromImages)),
 
     Choice: a
         .model({
