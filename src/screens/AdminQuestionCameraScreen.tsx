@@ -13,6 +13,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import ImageCropPicker from "react-native-image-crop-picker";
 
 type Props = NativeStackScreenProps<RootStackParamList, "AdminQuestionCamera">;
 
@@ -98,6 +99,46 @@ export default function AdminQuestionCameraScreen({
         });
     };
 
+    const editPhoto = async () => {
+        if (!capturedUri) {
+            return;
+        }
+
+        try {
+            const editedImage = await ImageCropPicker.openCropper({
+                path: capturedUri,
+                mediaType: "photo",
+                cropping: true,
+                freeStyleCropEnabled: true,
+                cropperToolbarTitle: "画像を切り取り",
+                cropperChooseText: "使用する",
+                cropperCancelText: "キャンセル",
+                compressImageQuality: 0.9,
+                includeExif: false,
+            });
+
+            if (!editedImage?.path) {
+                return;
+            }
+
+            setCapturedUri(editedImage.path);
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+
+            if (
+                message.includes("cancel") ||
+                message.includes("cancelled") ||
+                message.includes("User cancelled")
+            ) {
+                return;
+            }
+
+            console.error("Edit photo error:", error);
+            Alert.alert("エラー", "画像の切り取り・編集に失敗しました。");
+        }
+    };
+
     if (!permission) {
         return (
             <View style={styles.center}>
@@ -148,22 +189,13 @@ export default function AdminQuestionCameraScreen({
                     />
 
                     <View style={styles.previewActions}>
-                        <View style={styles.rotationRow}>
+                        <View style={styles.editRow}>
                             <TouchableOpacity
                                 style={styles.editButton}
-                                onPress={() => rotatePhoto(-90)}
+                                onPress={editPhoto}
                             >
                                 <Text style={styles.editButtonText}>
-                                    左回転
-                                </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.editButton}
-                                onPress={() => rotatePhoto(90)}
-                            >
-                                <Text style={styles.editButtonText}>
-                                    右回転
+                                    切り取り・編集
                                 </Text>
                             </TouchableOpacity>
                         </View>
@@ -380,18 +412,22 @@ const styles = StyleSheet.create({
         paddingTop: 12,
     },
 
+    editButtonText: {
+        color: "#ffffff",
+        fontSize: 15,
+        fontWeight: "800",
+    },
+
+    editRow: {
+        paddingHorizontal: 16,
+        paddingTop: 12,
+    },
+
     editButton: {
-        flex: 1,
         alignItems: "center",
         justifyContent: "center",
         borderRadius: 8,
         paddingVertical: 12,
         backgroundColor: "#4b5563",
-    },
-
-    editButtonText: {
-        color: "#ffffff",
-        fontSize: 15,
-        fontWeight: "800",
     },
 });
