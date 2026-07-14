@@ -158,18 +158,36 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
                                     {item.questionText}
                                 </Text>
 
-                                <Text style={styles.meta}>
-                                    カテゴリ: {item.category ?? "-"} / 難易度:{" "}
-                                    {item.difficulty ?? "-"}
-                                </Text>
+                                <View style={styles.metaRow}>
+                                    <Text
+                                        style={[styles.meta, styles.metaText]}
+                                    >
+                                        カテゴリ: {item.category ?? "-"} /
+                                        難易度: {item.difficulty ?? "-"}
+                                    </Text>
 
-                                <Text style={styles.meta}>
-                                    状態: {item.status ?? "-"}
-                                </Text>
-
-                                <Text style={styles.tapHint}>
-                                    タップして編集・削除
-                                </Text>
+                                    <View
+                                        style={[
+                                            styles.statusBadge,
+                                            item.status === "PUBLISHED"
+                                                ? styles.statusBadgePublished
+                                                : styles.statusBadgeDraft,
+                                        ]}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.statusBadgeText,
+                                                item.status === "PUBLISHED"
+                                                    ? styles.statusBadgeTextPublished
+                                                    : styles.statusBadgeTextDraft,
+                                            ]}
+                                        >
+                                            {item.status === "PUBLISHED"
+                                                ? "公開"
+                                                : "下書き"}
+                                        </Text>
+                                    </View>
+                                </View>
                             </Pressable>
                         )}
                     />
@@ -229,14 +247,46 @@ const styles = StyleSheet.create({
     cardPressed: {
         opacity: 0.7,
     },
-
-    tapHint: {
-        fontSize: 12,
-        color: "#9ca3af",
-    },
     questionNo: {
         fontSize: 15,
         fontWeight: "800",
         color: "#66728d",
+    },
+    metaRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+    },
+
+    metaText: {
+        flex: 1,
+    },
+
+    statusBadge: {
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+
+    statusBadgePublished: {
+        backgroundColor: "#dcfce7",
+    },
+
+    statusBadgeDraft: {
+        backgroundColor: "#f3f4f6",
+    },
+
+    statusBadgeText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+
+    statusBadgeTextPublished: {
+        color: "#166534",
+    },
+
+    statusBadgeTextDraft: {
+        color: "#4b5563",
     },
 });
