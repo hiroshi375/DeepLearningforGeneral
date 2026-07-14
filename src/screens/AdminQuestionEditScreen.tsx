@@ -55,6 +55,7 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
     const [solution, setSolution] = useState<SolutionItem | null>(null);
 
     const [questionText, setQuestionText] = useState("");
+    const [questionNoText, setQuestionNoText] = useState("");
     const [questionType, setQuestionType] = useState<"SINGLE" | "MULTIPLE">(
         "SINGLE",
     );
@@ -83,6 +84,12 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
             }
 
             setQuestion(loadedQuestion);
+            setQuestionNoText(
+                loadedQuestion.questionNo == null
+                    ? ""
+                    : String(loadedQuestion.questionNo),
+            );
+            setQuestionText(loadedQuestion.questionText ?? "");
             setQuestionText(loadedQuestion.questionText ?? "");
             setQuestionType(
                 loadedQuestion.questionType === "MULTIPLE"
@@ -166,6 +173,15 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
             return;
         }
 
+        const questionNo = Number(questionNoText);
+
+        if (!Number.isInteger(questionNo) || questionNo <= 0) {
+            Alert.alert(
+                "入力確認",
+                "問題番号は1以上の整数で入力してください。",
+            );
+            return;
+        }
         if (!questionText.trim()) {
             Alert.alert("未入力", "問題文を入力してください。");
             return;
@@ -173,9 +189,35 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
 
         setSaving(true);
 
+        if (question.examId) {
+            const duplicateResult = await client.models.Question.list({
+                filter: {
+                    examId: {
+                        eq: question.examId,
+                    },
+                    questionNo: {
+                        eq: questionNo,
+                    },
+                },
+            });
+
+            const duplicateQuestion = (
+                (duplicateResult.data ?? []) as QuestionItem[]
+            ).find((item) => item.id !== question.id);
+
+            if (duplicateQuestion) {
+                Alert.alert(
+                    "問題番号が重複しています",
+                    `同じ試験内に問題${questionNo}がすでに存在します。`,
+                );
+                return;
+            }
+        }
+
         try {
             await client.models.Question.update({
                 id: question.id,
+                questionNo,
                 questionText: questionText.trim(),
                 questionType,
                 selectionMax:
@@ -259,9 +301,14 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
                 >
                     <Text style={styles.title}>問題編集</Text>
 
-                    <Text style={styles.questionNo}>
-                        問題{question.questionNo ?? "-"}
-                    </Text>
+                    <Text style={styles.label}>問題番号</Text>
+                    <TextInput
+                        value={questionNoText}
+                        onChangeText={setQuestionNoText}
+                        keyboardType="number-pad"
+                        style={styles.input}
+                        placeholder="例: 1"
+                    />
 
                     <Text style={styles.label}>問題文</Text>
                     <TextInput
@@ -429,10 +476,5 @@ const styles = StyleSheet.create({
     },
     choiceInput: {
         flex: 1,
-    },
-    questionNo: {
-        fontSize: 18,
-        fontWeight: "800",
-        color: "#66728d",
     },
 });
