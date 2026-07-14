@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     Platform,
     ScrollView,
@@ -19,7 +20,6 @@ import * as FileSystem from "expo-file-system/legacy";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
-import * as ImagePicker from "expo-image-picker";
 import { getCurrentUser } from "aws-amplify/auth";
 import { uploadData } from "aws-amplify/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -72,6 +72,12 @@ type ExtractedQuestion = {
     choices: ExtractedChoice[];
 };
 
+type AdminQuestionImportDraft = {
+    questionImageUri: string | null;
+    explanationImageUri: string | null;
+    extractedQuestion: ExtractedQuestion | null;
+};
+
 type QuestionImportChoiceInput = {
     label: string;
     choiceText: string;
@@ -102,7 +108,7 @@ const CSV_TEMPLATE_SAMPLE =
 
 const CSV_TEMPLATE_TEXT = `${CSV_TEMPLATE_HEADER}\n${CSV_TEMPLATE_SAMPLE}\n`;
 
-const PENDING_IMPORT_IMAGE_TYPE_KEY = "adminQuestionImport.pendingImageType";
+const ADMIN_QUESTION_IMPORT_DRAFT_STORAGE_KEY = "adminQuestionImport.draft";
 
 function parseCsvLine(line: string): string[] {
     const result: string[] = [];
@@ -256,7 +262,15 @@ async function updateExamTotalQuestions(examId: string) {
     }
 }
 
-export default function AdminQuestionImportScreen({ navigation }: Props) {
+const waitForRendering = () =>
+    new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+    });
+
+export default function AdminQuestionImportScreen({
+    route,
+    navigation,
+}: Props) {
     const [importing, setImporting] = useState(false);
     const [questionImageUri, setQuestionImageUri] = useState<string | null>(
         null,
@@ -264,12 +278,110 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
     const [explanationImageUri, setExplanationImageUri] = useState<
         string | null
     >(null);
-    const [pendingImageType, setPendingImageType] = useState<
-        "question" | "explanation" | null
-    >(null);
     const [extracting, setExtracting] = useState(false);
     const [extractedQuestion, setExtractedQuestion] =
         useState<ExtractedQuestion | null>(null);
+
+    const readImportDraft = async (): Promise<AdminQuestionImportDraft> => {
+        const draftJson = await AsyncStorage.getItem(
+            ADMIN_QUESTION_IMPORT_DRAFT_STORAGE_KEY,
+        );
+
+        if (!draftJson) {
+            return {
+                questionImageUri: null,
+                explanationImageUri: null,
+                extractedQuestion: null,
+            };
+        }
+
+        return JSON.parse(draftJson) as AdminQuestionImportDraft;
+    };
+
+    const saveImportDraft = async (draft: AdminQuestionImportDraft) => {
+        await AsyncStorage.setItem(
+            ADMIN_QUESTION_IMPORT_DRAFT_STORAGE_KEY,
+            JSON.stringify(draft),
+        );
+    };
+
+    const clearImportDraft = async () => {
+        await AsyncStorage.removeItem(ADMIN_QUESTION_IMPORT_DRAFT_STORAGE_KEY);
+    };
+
+    useEffect(() => {
+        const restoreImportDraft = async () => {
+            try {
+                const draft = await readImportDraft();
+
+                if (draft.questionImageUri) {
+                    setQuestionImageUri(draft.questionImageUri);
+                }
+
+                if (draft.explanationImageUri) {
+                    setExplanationImageUri(draft.explanationImageUri);
+                }
+
+                if (draft.extractedQuestion) {
+                    setExtractedQuestion(draft.extractedQuestion);
+                }
+            } catch (error) {
+                console.error("Restore question import draft error:", error);
+            }
+        };
+
+        void restoreImportDraft();
+    }, []);
+
+    useEffect(() => {
+        const capturedImageType = route.params?.capturedImageType;
+        const capturedImageUri = route.params?.capturedImageUri;
+
+        if (!capturedImageType || !capturedImageUri) {
+            return;
+        }
+
+        const applyCapturedImage = async () => {
+            try {
+                const currentDraft = await readImportDraft();
+
+                const nextDraft: AdminQuestionImportDraft = {
+                    questionImageUri: currentDraft.questionImageUri,
+                    explanationImageUri: currentDraft.explanationImageUri,
+                    // 重要：新しい画像を撮ったら前回のOCR結果は破棄する
+                    extractedQuestion: null,
+                };
+
+                if (capturedImageType === "question") {
+                    nextDraft.questionImageUri = capturedImageUri;
+                } else {
+                    nextDraft.explanationImageUri = capturedImageUri;
+                }
+                // 新しい画像を撮った時点で、前回の読み取り結果を消す
+                setExtractedQuestion(null);
+
+                await saveImportDraft(nextDraft);
+
+                setQuestionImageUri(nextDraft.questionImageUri);
+                setExplanationImageUri(nextDraft.explanationImageUri);
+                setExtractedQuestion(null);
+
+                navigation.setParams({
+                    capturedImageType: undefined,
+                    capturedImageUri: undefined,
+                });
+            } catch (error) {
+                console.error("Apply captured image error:", error);
+                Alert.alert("エラー", "撮影画像の反映に失敗しました。");
+            }
+        };
+
+        void applyCapturedImage();
+    }, [
+        route.params?.capturedImageType,
+        route.params?.capturedImageUri,
+        navigation,
+    ]);
 
     const saveOrShareCsvFile = async ({
         filename,
@@ -969,122 +1081,33 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
         }
     }
 
-    const applyPickedImage = (
-        imageType: "question" | "explanation",
-        uri: string,
-    ) => {
-        if (imageType === "question") {
-            setQuestionImageUri(uri);
-            return;
-        }
-
-        setExplanationImageUri(uri);
-    };
-
-    const takeImage = async (imageType: "question" | "explanation") => {
-        const permissionResult =
-            await ImagePicker.requestCameraPermissionsAsync();
-
-        if (!permissionResult.granted) {
-            Alert.alert(
-                "権限が必要です",
-                "カメラを使用するにはカメラ権限が必要です。",
-            );
-            return;
-        }
-
-        try {
-            setPendingImageType(imageType);
-
-            await AsyncStorage.setItem(
-                PENDING_IMPORT_IMAGE_TYPE_KEY,
-                imageType,
-            );
-
-            const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                quality: 0.9,
-            });
-
-            if (result.canceled || result.assets.length === 0) {
-                return;
-            }
-
-            applyPickedImage(imageType, result.assets[0].uri);
-        } finally {
-            await AsyncStorage.removeItem(PENDING_IMPORT_IMAGE_TYPE_KEY);
-            setPendingImageType(null);
-        }
-    };
-
     const takeQuestionImage = async () => {
-        await takeImage("question");
+        setExtractedQuestion(null);
+
+        await saveImportDraft({
+            questionImageUri,
+            explanationImageUri,
+            extractedQuestion: null,
+        });
+
+        navigation.navigate("AdminQuestionCamera", {
+            imageType: "question",
+        });
     };
 
     const takeExplanationImage = async () => {
-        await takeImage("explanation");
+        setExtractedQuestion(null);
+
+        await saveImportDraft({
+            questionImageUri,
+            explanationImageUri,
+            extractedQuestion: null,
+        });
+
+        navigation.navigate("AdminQuestionCamera", {
+            imageType: "explanation",
+        });
     };
-
-    useEffect(() => {
-        const restorePendingImagePickerResult = async () => {
-            if (Platform.OS !== "android") {
-                return;
-            }
-
-            try {
-                const pendingResult = await ImagePicker.getPendingResultAsync();
-
-                if (!pendingResult) {
-                    return;
-                }
-
-                if (!("canceled" in pendingResult)) {
-                    console.warn(
-                        "ImagePicker pending result error:",
-                        pendingResult,
-                    );
-                    return;
-                }
-
-                if (
-                    pendingResult.canceled ||
-                    pendingResult.assets.length === 0
-                ) {
-                    return;
-                }
-
-                const storedImageType = await AsyncStorage.getItem(
-                    PENDING_IMPORT_IMAGE_TYPE_KEY,
-                );
-
-                const imageType =
-                    storedImageType === "question" ||
-                    storedImageType === "explanation"
-                        ? storedImageType
-                        : pendingImageType;
-
-                const uri = pendingResult.assets[0].uri;
-
-                if (imageType) {
-                    applyPickedImage(imageType, uri);
-                } else if (!questionImageUri) {
-                    setQuestionImageUri(uri);
-                } else if (!explanationImageUri) {
-                    setExplanationImageUri(uri);
-                }
-
-                await AsyncStorage.removeItem(PENDING_IMPORT_IMAGE_TYPE_KEY);
-            } catch (error) {
-                console.error(
-                    "Restore pending image picker result error:",
-                    error,
-                );
-            }
-        };
-
-        void restorePendingImagePickerResult();
-    }, [pendingImageType, questionImageUri, explanationImageUri]);
 
     const uploadImportImage = async (
         localUri: string,
@@ -1118,7 +1141,10 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
         }
 
         try {
+            setExtractedQuestion(null);
             setExtracting(true);
+
+            await waitForRendering();
 
             const questionImagePath = await uploadImportImage(
                 questionImageUri,
@@ -1146,6 +1172,12 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
 
             const parsed = JSON.parse(result.data) as ExtractedQuestion;
             setExtractedQuestion(parsed);
+
+            await saveImportDraft({
+                questionImageUri,
+                explanationImageUri,
+                extractedQuestion: parsed,
+            });
         } catch (error) {
             console.error("Extract question error:", error);
             Alert.alert("エラー", "画像の読み取りに失敗しました。");
@@ -1197,6 +1229,8 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
 
             await updateExamTotalQuestions(saveResult.examId);
 
+            await clearImportDraft();
+
             Alert.alert(
                 "登録完了",
                 saveResult.status === "updated"
@@ -1205,10 +1239,11 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
                 [
                     {
                         text: "続けて登録",
-                        onPress: () => {
+                        onPress: async () => {
                             setQuestionImageUri(null);
                             setExplanationImageUri(null);
                             setExtractedQuestion(null);
+                            await clearImportDraft();
                         },
                     },
                     {
@@ -1227,8 +1262,12 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
 
     return (
         <AdminOnly onBack={() => navigation.navigate("Home")}>
-            <View style={styles.container}>
-                <ScrollView contentContainerStyle={styles.container}>
+            <View style={styles.screen}>
+                <ScrollView
+                    style={styles.scrollView}
+                    contentContainerStyle={styles.content}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <Text style={styles.title}>問題一括登録</Text>
 
                     <Text style={styles.description}>
@@ -1444,17 +1483,29 @@ export default function AdminQuestionImportScreen({ navigation }: Props) {
                         {importing ? "登録中..." : "インポートする"}
                     </AppButton>
                 </ScrollView>
+
+                {extracting && (
+                    <View style={styles.processingOverlay}>
+                        <View style={styles.processingPanel}>
+                            <ActivityIndicator size="large" />
+
+                            <Text style={styles.processingTitle}>
+                                解析中...
+                            </Text>
+
+                            <Text style={styles.processingDescription}>
+                                問題文・選択肢・正解・解説を読み取っています。
+                                完了まで少しお待ちください。
+                            </Text>
+                        </View>
+                    </View>
+                )}
             </View>
         </AdminOnly>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        padding: 16,
-        gap: 12,
-        backgroundColor: "#ffffff",
-    },
     title: {
         fontSize: 24,
         fontWeight: "800",
@@ -1538,5 +1589,52 @@ const styles = StyleSheet.create({
         flex: 1,
         minHeight: 64,
         textAlignVertical: "top",
+    },
+    processingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(15, 23, 42, 0.55)",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 20,
+        elevation: 20,
+    },
+
+    processingPanel: {
+        width: "82%",
+        borderRadius: 16,
+        padding: 24,
+        backgroundColor: "#ffffff",
+        alignItems: "center",
+    },
+
+    processingTitle: {
+        marginTop: 16,
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#2f4050",
+    },
+
+    processingDescription: {
+        marginTop: 8,
+        fontSize: 14,
+        lineHeight: 20,
+        color: "#6b7280",
+        textAlign: "center",
+    },
+    screen: {
+        flex: 1,
+        backgroundColor: "#ffffff",
+    },
+
+    scrollView: {
+        flex: 1,
+        backgroundColor: "#ffffff",
+    },
+
+    content: {
+        padding: 16,
+        paddingBottom: 96,
+        gap: 12,
+        backgroundColor: "#ffffff",
     },
 });

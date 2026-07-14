@@ -21,6 +21,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "AdminQuestionEdit">;
 type QuestionItem = {
     id: string;
     examId?: string | null;
+    questionNo?: number | null;
     questionText?: string | null;
     questionType?: string | null;
     selectionMax?: number | null;
@@ -251,9 +252,16 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
 
     return (
         <AdminOnly onBack={() => navigation.navigate("Home")}>
-            <View style={styles.container}>
-                <ScrollView contentContainerStyle={styles.container}>
+            <View style={styles.root}>
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <Text style={styles.title}>問題編集</Text>
+
+                    <Text style={styles.questionNo}>
+                        問題{question.questionNo ?? "-"}
+                    </Text>
 
                     <Text style={styles.label}>問題文</Text>
                     <TextInput
@@ -325,12 +333,15 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
                             <Text style={styles.choiceLabel}>
                                 {choice.label}
                             </Text>
+
                             <TextInput
                                 value={choice.choiceText ?? ""}
                                 onChangeText={(text) =>
                                     updateChoiceText(choice.id, text)
                                 }
                                 style={[styles.input, styles.choiceInput]}
+                                multiline
+                                textAlignVertical="top"
                             />
                         </View>
                     ))}
@@ -361,8 +372,14 @@ export default function AdminQuestionEditScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-    container: {
+    root: {
+        flex: 1,
+        backgroundColor: "#ffffff",
+    },
+
+    scrollContent: {
         padding: 16,
+        paddingBottom: 80,
         gap: 12,
         backgroundColor: "#ffffff",
     },
@@ -412,5 +429,10 @@ const styles = StyleSheet.create({
     },
     choiceInput: {
         flex: 1,
+    },
+    questionNo: {
+        fontSize: 18,
+        fontWeight: "800",
+        color: "#66728d",
     },
 });

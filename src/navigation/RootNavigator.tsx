@@ -20,6 +20,7 @@ import ResultDetailScreen from "../screens/ResultDetailScreen";
 import ReviewScreen from "../screens/ReviewScreen";
 import StudyStatsScreen from "../screens/StudyStatsScreen";
 import ProfileScreen from "../screens/ProfileScreen";
+import AdminQuestionCameraScreen from "../screens/AdminQuestionCameraScreen";
 
 export type RootStackParamList = {
     Home: undefined;
@@ -40,8 +41,15 @@ export type RootStackParamList = {
     AdminQuestionEdit: {
         questionId: string;
     };
-    AdminQuestionImport: undefined;
-
+    AdminQuestionImport:
+        | {
+              capturedImageType?: "question" | "explanation";
+              capturedImageUri?: string;
+          }
+        | undefined;
+    AdminQuestionCamera: {
+        imageType: "question" | "explanation";
+    };
     AdminExamCreate: undefined;
     AdminExamList: undefined;
     AdminExamEdit: {
@@ -163,6 +171,14 @@ export default function RootNavigator() {
                     name="Profile"
                     component={ProfileScreen}
                     options={{ title: "プロフィール" }}
+                />
+
+                <Stack.Screen
+                    name="AdminQuestionCamera"
+                    component={AdminQuestionCameraScreen}
+                    options={{
+                        title: "画像を撮影",
+                    }}
                 />
             </Stack.Navigator>
         </NavigationContainer>

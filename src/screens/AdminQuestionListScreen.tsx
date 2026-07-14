@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
     Alert,
     FlatList,
+    Pressable,
     RefreshControl,
     StyleSheet,
     Text,
@@ -19,6 +20,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "AdminQuestionList">;
 type QuestionItem = {
     id: string;
     examId?: string | null;
+    questionNo?: number | null;
     questionText?: string | null;
     category?: string | null;
     difficulty?: string | null;
@@ -34,7 +36,22 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
 
         try {
             const result = await client.models.Question.list();
-            setQuestions((result.data ?? []) as QuestionItem[]);
+
+            const sortedQuestions = (
+                (result.data ?? []) as QuestionItem[]
+            ).sort((a, b) => {
+                const examCompare = (a.examId ?? "").localeCompare(
+                    b.examId ?? "",
+                );
+
+                if (examCompare !== 0) {
+                    return examCompare;
+                }
+
+                return (a.questionNo ?? 0) - (b.questionNo ?? 0);
+            });
+
+            setQuestions(sortedQuestions);
         } catch (error) {
             console.error("Question list error:", error);
             Alert.alert("エラー", "問題一覧の取得に失敗しました。");
@@ -66,10 +83,35 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
         ]);
     };
 
+    const showQuestionActionDialog = (question: QuestionItem) => {
+        Alert.alert(
+            "問題の操作",
+            `問題${question.questionNo ?? "-"}をどうしますか？`,
+            [
+                {
+                    text: "キャンセル",
+                    style: "cancel",
+                },
+                {
+                    text: "編集",
+                    onPress: () =>
+                        navigation.navigate("AdminQuestionEdit", {
+                            questionId: question.id,
+                        }),
+                },
+                {
+                    text: "削除",
+                    style: "destructive",
+                    onPress: () => deleteQuestion(question.id),
+                },
+            ],
+        );
+    };
+
     return (
         <AdminOnly onBack={() => navigation.navigate("Home")}>
-            <View style={styles.container}>
-                <View style={styles.container}>
+            <View style={styles.root}>
+                <View style={styles.content}>
                     <View style={styles.header}>
                         <Text style={styles.title}>問題一覧</Text>
                         <AppButton
@@ -85,6 +127,7 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
                     <FlatList
                         data={questions}
                         keyExtractor={(item) => item.id}
+                        contentContainerStyle={styles.listContent}
                         refreshControl={
                             <RefreshControl
                                 refreshing={loading}
@@ -97,7 +140,17 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
                             </Text>
                         }
                         renderItem={({ item }) => (
-                            <View style={styles.card}>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.card,
+                                    pressed && styles.cardPressed,
+                                ]}
+                                onPress={() => showQuestionActionDialog(item)}
+                            >
+                                <Text style={styles.questionNo}>
+                                    問題{item.questionNo ?? "-"}
+                                </Text>
+
                                 <Text
                                     style={styles.questionText}
                                     numberOfLines={3}
@@ -114,28 +167,10 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
                                     状態: {item.status ?? "-"}
                                 </Text>
 
-                                <View style={styles.buttonRow}>
-                                    <AppButton
-                                        onPress={() =>
-                                            navigation.navigate(
-                                                "AdminQuestionEdit",
-                                                {
-                                                    questionId: item.id,
-                                                },
-                                            )
-                                        }
-                                    >
-                                        編集
-                                    </AppButton>
-
-                                    <AppButton
-                                        mode="outlined"
-                                        onPress={() => deleteQuestion(item.id)}
-                                    >
-                                        削除
-                                    </AppButton>
-                                </View>
-                            </View>
+                                <Text style={styles.tapHint}>
+                                    タップして編集・削除
+                                </Text>
+                            </Pressable>
                         )}
                     />
                 </View>
@@ -145,10 +180,19 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-    container: {
+    root: {
+        flex: 1,
+        backgroundColor: "#ffffff",
+    },
+
+    content: {
         flex: 1,
         padding: 16,
         backgroundColor: "#ffffff",
+    },
+
+    listContent: {
+        paddingBottom: 80,
     },
     header: {
         gap: 12,
@@ -182,8 +226,17 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: "#6b7280",
     },
-    buttonRow: {
-        flexDirection: "row",
-        gap: 8,
+    cardPressed: {
+        opacity: 0.7,
+    },
+
+    tapHint: {
+        fontSize: 12,
+        color: "#9ca3af",
+    },
+    questionNo: {
+        fontSize: 15,
+        fontWeight: "800",
+        color: "#66728d",
     },
 });
