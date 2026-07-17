@@ -27,22 +27,51 @@ type QuestionItem = {
     status?: string | null;
 };
 
+type ExamItem = {
+    id: string;
+    code?: string | null;
+    title?: string | null;
+};
+
 export default function AdminQuestionListScreen({ navigation }: Props) {
     const [questions, setQuestions] = useState<QuestionItem[]>([]);
+    const [examCodeById, setExamCodeById] = useState<Record<string, string>>(
+        {},
+    );
     const [loading, setLoading] = useState(false);
 
     const loadQuestions = useCallback(async () => {
         setLoading(true);
 
         try {
-            const result = await client.models.Question.list();
+            const [questionResult, examResult] = await Promise.all([
+                client.models.Question.list(),
+                client.models.Exam.list(),
+            ]);
+
+            const exams = (examResult.data ?? []) as ExamItem[];
+
+            const nextExamCodeById = exams.reduce<Record<string, string>>(
+                (acc, exam) => {
+                    acc[exam.id] = exam.code ?? "-";
+                    return acc;
+                },
+                {},
+            );
+
+            setExamCodeById(nextExamCodeById);
 
             const sortedQuestions = (
-                (result.data ?? []) as QuestionItem[]
+                (questionResult.data ?? []) as QuestionItem[]
             ).sort((a, b) => {
-                const examCompare = (a.examId ?? "").localeCompare(
-                    b.examId ?? "",
-                );
+                const examCodeA = a.examId
+                    ? (nextExamCodeById[a.examId] ?? "")
+                    : "";
+                const examCodeB = b.examId
+                    ? (nextExamCodeById[b.examId] ?? "")
+                    : "";
+
+                const examCompare = examCodeA.localeCompare(examCodeB);
 
                 if (examCompare !== 0) {
                     return examCompare;
@@ -147,9 +176,18 @@ export default function AdminQuestionListScreen({ navigation }: Props) {
                                 ]}
                                 onPress={() => showQuestionActionDialog(item)}
                             >
-                                <Text style={styles.questionNo}>
-                                    問題{item.questionNo ?? "-"}
-                                </Text>
+                                <View style={styles.questionHeaderRow}>
+                                    <Text style={styles.examCode}>
+                                        問題セット:{" "}
+                                        {item.examId
+                                            ? (examCodeById[item.examId] ?? "-")
+                                            : "-"}
+                                    </Text>
+
+                                    <Text style={styles.questionNo}>
+                                        問題{item.questionNo ?? "-"}
+                                    </Text>
+                                </View>
 
                                 <Text
                                     style={styles.questionText}
@@ -248,7 +286,7 @@ const styles = StyleSheet.create({
         opacity: 0.7,
     },
     questionNo: {
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: "800",
         color: "#66728d",
     },
@@ -287,6 +325,18 @@ const styles = StyleSheet.create({
     },
 
     statusBadgeTextDraft: {
+        color: "#4b5563",
+    },
+    questionHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        gap: 10,
+    },
+
+    examCode: {
+        fontSize: 14,
+        fontWeight: "800",
         color: "#4b5563",
     },
 });
